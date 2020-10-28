@@ -73,7 +73,7 @@ RCT_EXPORT_METHOD(setupObserverWithCallback:(RCTResponseSenderBlock)callback)
   [self observeSampleTyle:sleepSampleType withCallback:callback];
   
   // Motion
-  [self getMotionActivity];
+//  [self getMotionActivity];
 }
 
 RCT_EXPORT_METHOD(handleBackgroundTaskWithCallback:(RCTResponseSenderBlock)callback)
@@ -101,6 +101,11 @@ RCT_EXPORT_METHOD(handleBackgroundTaskWithCallback:(RCTResponseSenderBlock)callb
   [lastOp setCompletionBlock:^{
     [task setTaskCompletedWithSuccess:!lastOp.isCancelled];
   }];
+}
+
+RCT_EXPORT_METHOD(getMotionActivities:(RCTResponseSenderBlock)callback)
+{
+  [self getMotionActivityWithCallback:callback];
 }
 
 - (void)registerBackgroundHandler {
@@ -161,7 +166,7 @@ RCT_EXPORT_METHOD(handleBackgroundTaskWithCallback:(RCTResponseSenderBlock)callb
 }
 
 
-- (void)getMotionActivity {
+- (void)getMotionActivityWithCallback:(RCTResponseSenderBlock)callback {
   
   CMMotionActivityManager *manager = [[CMMotionActivityManager alloc] init];
  
@@ -174,17 +179,77 @@ RCT_EXPORT_METHOD(handleBackgroundTaskWithCallback:(RCTResponseSenderBlock)callb
   NSOperationQueue *queue = [[NSOperationQueue alloc] init];
   queue.maxConcurrentOperationCount = 1;
   
-  NSDate *start = [NSDate dateWithTimeIntervalSinceNow:-86400];
+  NSDate *start = [NSDate dateWithTimeIntervalSinceNow:-259200]; // 3 days
   NSDate *end = [NSDate date];
   [manager queryActivityStartingFromDate:start
                                   toDate:end
                                  toQueue:queue
                              withHandler:^(NSArray<CMMotionActivity *> * _Nullable activities, NSError * _Nullable error) {
     
+    if (error) {
+      callback(@[RCTMakeError(@"", error, nil)]);
+      return;
+    }
     
+//    NSMutableArray *results = [NSMutableArray array];
+    // 1. put in day
+    // 2. put in hourly slot, 24 slots
+    //   2.1 timestamp of first activity in each hour
+    NSMutableDictionary *days = [NSMutableDictionary dictionary];
+
+//    NSMutableDictionary *hours = [NSMutableDictionary dictionary];
+    
+    NSDateFormatter *dayFormatter = [[NSDateFormatter alloc] init];
+    dayFormatter.timeZone = [NSTimeZone localTimeZone];
+    dayFormatter.locale = [[NSLocale alloc] initWithLocaleIdentifier:@"en_US"];
+    dayFormatter.dateFormat = @"y-LL-dd";
+    
+    NSDateFormatter *hourFormatter = [[NSDateFormatter alloc] init];
+    hourFormatter.timeZone = [NSTimeZone localTimeZone];
+    hourFormatter.locale = [[NSLocale alloc] initWithLocaleIdentifier:@"en_US"];
+    hourFormatter.dateFormat = @"HH";
+    
+    for (CMMotionActivity *activity in activities) {
+        // do something with object
+      NSString *start = [dayFormatter stringFromDate:activity.startDate];
+      NSString *hour = [hourFormatter stringFromDate:activity.startDate];
+      NSMutableDictionary *day = [days objectForKey:start];
+      if (day != nil) {
+        // update - add hours
+        [self updateDay:day hour:hour withActivity:activity];
+      } else {
+        // create
+        [days setObject:[NSMutableDictionary dictionaryWithObject:[self activityFromMotionActivity:activity] forKey:hour]
+                 forKey:start];
+      }
+    }
+    
+    callback(@[[NSNull null], days]);
   }];
-  
-  
+}
+
+- (void)updateDay:(NSMutableDictionary *)day hour:(NSString *)hour withActivity:(CMMotionActivity *)activity{
+  NSMutableDictionary *hourObject = [day objectForKey:hour];
+  if (hourObject != nil) {
+      // ignore
+  } else {
+    // add
+    [day setObject:[self activityFromMotionActivity:activity] forKey:hour];
+  }
+}
+
+- (NSDictionary *)activityFromMotionActivity:(CMMotionActivity *)activity {
+  NSISO8601DateFormatter *dateFormatter = [[NSISO8601DateFormatter alloc] init];
+  return @{
+    @"startDate": [dateFormatter stringFromDate:activity.startDate],
+    @"confidence": @(activity.confidence),
+    @"unknown": activity.unknown ? @YES : @NO,
+    @"stationary": activity.stationary ? @YES : @NO,
+    @"walking": activity.walking ? @YES : @NO,
+    @"running": activity.running ? @YES : @NO,
+    @"automotive": activity.automotive ? @YES : @NO,
+    @"cycling": activity.cycling ? @YES : @NO
+  };
 }
 
 @end
